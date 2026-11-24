@@ -99,8 +99,20 @@ export function demoPort(cfg = loadConfig()) {
   return p >= 65535 ? p - 1 : p + 1;
 }
 
-/** setup 이 처음 만들어 두는 config.json 내용 */
+/**
+ * 처음 설치할 때 켜 두는 구성 — 가짜 직원 4명·일하는 척·스킬 꼬마·팀장 보고(알림 포함).
+ * 코드 기본값(DEFAULTS)은 꺼짐 그대로다: config.json 이 없거나 깨지면 아무것도 켜지지 않는다.
+ */
+export const STARTER = Object.freeze({
+  guests: Object.freeze(['김대리', '박과장', '이인턴', '최팀장']),
+  skillMinis: true,
+  guestsWork: true,
+  lead: '최팀장',
+  notify: true,
+});
+
+/** setup 이 처음 만들어 두는 config.json 내용 — 기본값 위에 STARTER 를 얹는다 */
 export function defaultConfigText() {
-  const { port, autoStart, homes, hide, guests, skillMinis, guestsWork, lead, notify, reportDir, fallbackMinutes, staleHours, kidCommits, lang } = DEFAULTS;
+  const { port, autoStart, homes, hide, guests, skillMinis, guestsWork, lead, notify, reportDir, fallbackMinutes, staleHours, kidCommits, lang } = { ...DEFAULTS, ...STARTER };
   return JSON.stringify({ port, autoStart, homes, hide, guests, skillMinis, guestsWork, lead, notify, reportDir, fallbackMinutes, staleHours, kidCommits, lang }, null, 2) + '\n';
 }

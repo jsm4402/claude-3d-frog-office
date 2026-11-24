@@ -36,6 +36,7 @@ const env = {
   CLAUDE_CONFIG_DIR: path.join(tmp, 'cfg'),
   CLAUDE_OFFICE_HOME: path.join(tmp, 'home'),
   CLAUDE_OFFICE_PORT: String(port),
+  CLAUDE_OFFICE_REPORT_DIR: path.join(tmp, 'reports'), // 처음 설치는 팀장 보고가 켜진다 — 진짜 보고 폴더에 쓰지 않게
 };
 const run = (script, ...args) => spawnSync(process.execPath, [path.join(REPO, 'scripts', script), ...args], { env, encoding: 'utf8', timeout: 30000 });
 
@@ -51,6 +52,11 @@ test('setup → status → start → demo → stop → uninstall', () => {
   assert.match(r.stdout, new RegExp(`127\\.0\\.0\\.1:${port}`));
   assert.deepEqual(installedEvents(settings), EVENTS); // settings.json 이 없어도 새로 만든다
   assert.ok(fs.existsSync(path.join(tmp, 'home', 'config.json')));
+  const made = JSON.parse(fs.readFileSync(path.join(tmp, 'home', 'config.json'), 'utf8')); // 처음 설치는 가짜 직원·팀장 보고가 켜진 채로
+  assert.equal(made.guests.length, 4);
+  assert.ok(made.guests.includes(made.lead));
+  assert.deepEqual([made.guestsWork, made.skillMinis, made.notify], [true, true, true]);
+  assert.match(r.stdout, /team-lead report/); // 보고 파일이 쌓인다는 걸 설치 때 알린다
   assert.equal(JSON.parse(fs.readFileSync(path.join(tmp, 'home', 'server.pid'), 'utf8')).port, port);
 
   r = run('setup.mjs', '--no-open'); // 두 번째 — 중복 없이 그대로

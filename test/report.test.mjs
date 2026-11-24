@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { formatReport, saveReport, latestReport, reportDir } from '../server/report.mjs';
-import { normalizeConfig } from '../server/config.mjs';
+import { STARTER, defaultConfigText, normalizeConfig } from '../server/config.mjs';
 
 const r = { at: Date.now(), startedAt: Date.now() - 5 * 60000, n: 2, tasks: ['첫째 일', '둘째\n일'], who: ['docs', 'app'] };
 
@@ -39,6 +39,15 @@ test('config: notify·reportDir 정규화', () => {
   assert.equal(normalizeConfig({ notify: true }).notify, true);
   assert.equal(normalizeConfig({ notify: 'yes' }).notify, false);
   assert.equal(normalizeConfig({ reportDir: ' reports/out ' }).reportDir, 'reports/out');
+});
+
+test('config: 처음 만드는 config.json 은 가짜 직원·팀장 보고가 켜져 있고, 코드 기본값은 꺼짐 그대로', () => {
+  const made = normalizeConfig(JSON.parse(defaultConfigText()));
+  assert.deepEqual(made.guests, [...STARTER.guests]);
+  assert.ok(made.guests.includes(made.lead));
+  assert.deepEqual([made.guestsWork, made.skillMinis, made.notify], [true, true, true]);
+  const bare = normalizeConfig({}); // 파일이 없거나 깨졌을 때
+  assert.deepEqual([bare.guests.length, bare.lead, bare.guestsWork, bare.skillMinis, bare.notify], [0, '', false, false, false]);
 });
 
 import { absorb, sectionsOf } from '../server/report.mjs';

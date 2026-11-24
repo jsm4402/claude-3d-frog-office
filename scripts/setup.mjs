@@ -5,6 +5,7 @@ import { configFile, logFile, officeHome, settingsFile } from '../server/paths.m
 import { defaultConfigText, loadConfig, resolvePort } from '../server/config.mjs';
 import { EVENTS, buildCommand, installHooks, readSettingsStrict, writeSettings } from '../server/hooks-config.mjs';
 import { health, openBrowser, portBusy, startDetached, urlOf, waitHealth } from '../server/control.mjs';
+import { reportDir } from '../server/report.mjs';
 import { fail, has, requireNode, say } from './common.mjs';
 
 requireNode();
@@ -31,7 +32,7 @@ if (dryRun) {
   console.log(`  add: ${plan.added.join(', ') || '-'}`);
   console.log(`  update: ${plan.updated.join(', ') || '-'}`);
   console.log(`  already: ${plan.skipped.join(', ') || '-'}`);
-  console.log(`config.json: ${configFile()}${cfgExists ? ' (있음 / exists)' : ' (기본값으로 만듦 / will be created)'}`);
+  console.log(`config.json: ${configFile()}${cfgExists ? ' (있음 / exists)' : ' (가짜 직원·팀장 보고를 켠 채로 만듦 / will be created with guests and the team-lead report on)'}`);
   console.log(`server: ${urlOf(resolvePort())}`);
   process.exit(0);
 }
@@ -74,3 +75,13 @@ const hookEn = `${n} hooks (${plan.added.length} new, ${plan.updated.length} upd
 if (backup) console.log(`backup: ${backup}`);
 say(`완료: 3D 사무실 ${url} — ${hookKo}. 이미 열려 있던 Claude 세션은 다시 켜면 승인 대기까지 보입니다.`,
   `Done: 3D office at ${url} — ${hookEn}. Restart Claude sessions that were already open to see permission prompts too.`);
+
+// 가짜 직원·팀장 보고가 켜져 있는지, 보고 파일이 어디에 쌓이는지 알린다(대화 요약이 파일로 남으니 숨기지 않는다)
+const cfg = loadConfig();
+if (cfg.lead && cfg.guests.includes(cfg.lead)) {
+  say(`가짜 직원 ${cfg.guests.length}명과 팀장 보고(${cfg.lead})가 켜져 있습니다. 일이 끝나면 작업 요약이 ${reportDir(cfg)} 에 파일로 쌓입니다${cfg.notify ? ' (윈도우 알림 포함)' : ''}. 내 컴퓨터 밖으로는 나가지 않습니다. 끄려면 ${configFile()} 에서 "lead" 를 "" 로 바꾸세요.`,
+    `${cfg.guests.length} guest employees and the team-lead report (${cfg.lead}) are on. When work finishes, a summary is appended to a file in ${reportDir(cfg)}${cfg.notify ? ' (with a Windows notification)' : ''}. Nothing leaves this computer. To turn it off, set "lead" to "" in ${configFile()}.`);
+} else if (cfgExists) {
+  say(`이미 있던 config.json 은 건드리지 않았습니다. 가짜 직원·스킬 꼬마·팀장 보고를 켜려면 Claude 에게 "가짜 직원 넣어줘"라고 말하거나 README 의 '이 판에서 더한 것'을 보세요.`,
+    `Your existing config.json was left as is. To turn on guests, skill minis and the team-lead report, see the README (Korean section '이 판에서 더한 것').`);
+}

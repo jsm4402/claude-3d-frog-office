@@ -1,4 +1,4 @@
-// 팀장 보고 — 일이 끝나면 (1) 마크다운 파일로 쌓고 (2) 윈도우 알림을 띄우고 (3) 화면에서 다시 볼 수 있게 가장 최근 보고를 기억한다.
+// 팀장 보고 — 일이 끝나면 (1) 마크다운 파일로 쌓고 (2) 알림(윈도우·맥·리눅스)을 띄우고 (3) 화면에서 다시 볼 수 있게 가장 최근 보고를 기억한다.
 // 바깥으로 나가는 건 없다: 파일은 내 PC 폴더, 알림은 내 PC 알림 센터.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -138,11 +138,16 @@ export function latestReport(cfg = {}) {
   }
 }
 
-/** 윈도우 알림 — 글은 환경변수로만 넘겨 명령 조각에 섞이지 않게 한다. 다른 OS 는 아무것도 안 한다 */
-export function notifyReport(r) {
-  if (process.platform !== 'win32') return false;
-  const first = (r.sections && r.sections[0] && (r.sections[0].result || r.sections[0].request)) || r.tasks[0] || '';
-  const head = first ? `: ${String(first).replace(/\s+/g, ' ').trim().slice(0, 70)}` : '';
+/**
+ * 알림 한 건을 띄울 명령 — OS 마다 다르다. 글은 인자·환경변수로만 넘겨 명령문에 섞이지 않게 한다.
+ * 윈도우: 알림 센터(파워셸), 맥: 알림 센터(osascript), 리눅스: notify-send(없으면 조용히 실패). 그 밖의 OS 는 null.
+ */
+export function notifyCommand(platform, title, body) {
+  if (platform === 'darwin') {
+    return { cmd: 'osascript', args: ['-e', 'on run argv', '-e', 'display notification (item 2 of argv) with title (item 1 of argv)', '-e', 'end run', title, body], env: {} };
+  }
+  if (platform === 'linux') return { cmd: 'notify-send', args: [title, body], env: {} };
+  if (platform !== 'win32') return null;
   const script = [
     "$ErrorActionPreference='Stop'",
     '[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]|Out-Null',
@@ -155,10 +160,16 @@ export function notifyReport(r) {
     "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show($n)",
   ].join(';');
   const enc = Buffer.from(script, 'utf16le').toString('base64');
-  execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', enc], {
-    windowsHide: true, timeout: 15000,
-    env: { ...process.env, OFFICE_TITLE: '팀장 보고', OFFICE_BODY: `업무 ${r.n}건 끝났습니다${head}` },
-  }, (err) => {
+  return { cmd: 'powershell.exe', args: ['-NoProfile', '-NonInteractive', '-EncodedCommand', enc], env: { OFFICE_TITLE: title, OFFICE_BODY: body } };
+}
+
+/** 팀장 보고 알림을 띄운다. 띄울 방법이 없는 OS 면 false. opts 는 시험용 주입(platform·exec) */
+export function notifyReport(r, opts = {}) {
+  const first = (r.sections && r.sections[0] && (r.sections[0].result || r.sections[0].request)) || (r.tasks && r.tasks[0]) || '';
+  const head = first ? `: ${String(first).replace(/\s+/g, ' ').trim().slice(0, 70)}` : '';
+  const c = notifyCommand(opts.platform || process.platform, '팀장 보고', `업무 ${r.n}건 끝났습니다${head}`);
+  if (!c) return false;
+  (opts.exec || execFile)(c.cmd, c.args, { windowsHide: true, timeout: 15000, env: { ...process.env, ...c.env } }, (err) => {
     if (err) console.error(new Date().toISOString(), 'notify failed:', err.message);
   });
   return true;

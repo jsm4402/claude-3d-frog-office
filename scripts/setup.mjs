@@ -84,8 +84,8 @@ if (cfg.lead && cfg.guests.includes(cfg.lead)) {
     say(`가짜 직원은 ${hrs[0]}시에 출근하고 ${hrs[1]}시에 퇴근합니다(그 밖의 시간에는 일이 생길 때만 나옵니다). 항상 있게 하려면 config.json 의 "guestHours" 를 [] 로 바꾸세요.`,
       `Guests are in from ${hrs[0]}:00 to ${hrs[1]}:00 local time (outside those hours they only come in when there is work). Set "guestHours" to [] to keep them in all day.`);
   }
-  say(`가짜 직원 ${cfg.guests.length}명과 팀장 보고(${cfg.lead})가 켜져 있습니다. 일이 끝나면 작업 요약이 ${reportDir(cfg)} 에 파일로 쌓입니다${cfg.notify ? ' (윈도우 알림 포함)' : ''}. 내 컴퓨터 밖으로는 나가지 않습니다. 끄려면 ${configFile()} 에서 "lead" 를 "" 로 바꾸세요.`,
-    `${cfg.guests.length} guest employees and the team-lead report (${cfg.lead}) are on. When work finishes, a summary is appended to a file in ${reportDir(cfg)}${cfg.notify ? ' (with a Windows notification)' : ''}. Nothing leaves this computer. To turn it off, set "lead" to "" in ${configFile()}.`);
+  say(`가짜 직원 ${cfg.guests.length}명과 팀장 보고(${cfg.lead})가 켜져 있습니다. 일이 끝나면 작업 요약이 ${reportDir(cfg)} 에 파일로 쌓입니다${cfg.notify ? ' (알림 포함)' : ''}. 내 컴퓨터 밖으로는 나가지 않습니다. 끄려면 ${configFile()} 에서 "lead" 를 "" 로 바꾸세요.`,
+    `${cfg.guests.length} guest employees and the team-lead report (${cfg.lead}) are on. When work finishes, a summary is appended to a file in ${reportDir(cfg)}${cfg.notify ? ' (with a desktop notification)' : ''}. Nothing leaves this computer. To turn it off, set "lead" to "" in ${configFile()}.`);
 } else if (cfgExists) {
   say(`이미 있던 config.json 은 건드리지 않았습니다. 가짜 직원·스킬 꼬마·팀장 보고를 켜려면 Claude 에게 "가짜 직원 넣어줘"라고 말하거나 README 의 '이 판에서 더한 것'을 보세요.`,
     `Your existing config.json was left as is. To turn on guests, skill minis and the team-lead report, see the README (Korean section '이 판에서 더한 것').`);

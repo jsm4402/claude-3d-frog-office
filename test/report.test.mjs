@@ -52,7 +52,27 @@ test('config: 처음 만드는 config.json 은 가짜 직원·팀장 보고가 �
   assert.deepEqual([bare.guests.length, bare.lead, bare.guestsWork, bare.skillMinis, bare.notify], [0, '', false, false, false]);
 });
 
-import { absorb, sectionsOf } from '../server/report.mjs';
+import { absorb, sectionsOf, notifyReport } from '../server/report.mjs';
+
+test('알림: 윈도우·맥·리눅스마다 맞는 명령을 부르고, 글은 명령문에 섞지 않는다', () => {
+  const calls = [];
+  const exec = (cmd, args, opts, cb) => { calls.push({ cmd, args, env: opts.env }); cb(null); };
+  const rep = { n: 2, tasks: ['첫"째; rm -rf $(x)'], sections: [] };
+  const body = '업무 2건 끝났습니다: 첫"째; rm -rf $(x)';
+  assert.equal(notifyReport(rep, { platform: 'darwin', exec }), true);
+  assert.equal(calls[0].cmd, 'osascript');
+  assert.deepEqual(calls[0].args.slice(-2), ['팀장 보고', body]); // 글은 맨 끝 인자 두 개로만
+  assert.ok(!calls[0].args.slice(0, -2).join(' ').includes('rm -rf'));
+  assert.equal(notifyReport(rep, { platform: 'linux', exec }), true);
+  assert.deepEqual([calls[1].cmd, calls[1].args], ['notify-send', ['팀장 보고', body]]);
+  assert.equal(notifyReport(rep, { platform: 'win32', exec }), true);
+  assert.equal(calls[2].cmd, 'powershell.exe');
+  assert.equal(calls[2].env.OFFICE_BODY, body); // 윈도우는 환경변수로
+  assert.ok(!Buffer.from(calls[2].args[calls[2].args.length - 1], 'base64').toString('utf16le').includes('rm -rf'));
+  assert.equal(notifyReport(rep, { platform: 'aix', exec }), false); // 방법이 없는 OS 는 조용히 건너뛴다
+  assert.equal(calls.length, 3);
+  assert.equal(notifyReport({ n: 1, sections: [{ result: '끝' }] }, { platform: 'darwin', exec }), true); // tasks 가 없어도 된다
+});
 
 test('absorb·sectionsOf: 직원별로 결과·파일·도구·흐름을 모으고 같은 기록은 한 번만 센다', () => {
   const work = new Map();

@@ -13,7 +13,7 @@
 | "상태 봐줘", "안 보여", "doctor", "status" | `node scripts/status.mjs` 결과를 읽고 아래 **문제 해결** 참고 |
 | "데모 보여줘", "demo" | `node scripts/start.mjs --demo --open` (가짜 데이터, 실제 세션과 무관) |
 | "지워줘", "제거", "uninstall" | `node scripts/uninstall.mjs` (상태 폴더까지 지우려면 `--purge`) |
-| "가짜 직원 넣어줘", "팀장 보고 켜줘·꺼줘", "알림 켜줘·꺼줘" | `~/.claude-office/config.json` 의 `guests`·`guestsWork`·`skillMinis`·`lead`·`notify`·`reportDir` 를 고친다(뜻은 README 의 **이 판에서 더한 것**). 이름은 사용자에게 물어 정하고, `lead` 는 `guests` 안의 이름이어야 한다. 팀장 보고를 켜면 대화 기록 요약이 내 PC 폴더에 파일로 쌓인다는 점을 먼저 알린다 |
+| "가짜 직원 넣어줘", "팀장 보고 켜줘·꺼줘", "알림 켜줘·꺼줘" | `~/.claude-office/config.json` 의 `guests`·`guestsWork`·`guestHours`(출퇴근 시간, 예 `[9, 18]`)·`skillMinis`·`lead`·`notify`·`reportDir` 를 고친다(뜻은 README 의 **이 판에서 더한 것**). 이름은 사용자에게 물어 정하고, `lead` 는 `guests` 안의 이름이어야 한다. 팀장 보고를 켜면 대화 기록 요약이 내 PC 폴더에 파일로 쌓인다는 점을 먼저 알린다 |
 
 ## 설치 절차
 
@@ -22,7 +22,7 @@
      Windows `winget install OpenJS.NodeJS.LTS`, Linux 는 배포판 패키지 관리자. **사용자 동의 없이 시스템 프로그램을 설치하지 않는다.**
 2. `node scripts/setup.mjs` 를 실행한다. 이 스크립트가 하는 일:
    - Claude 설정(`~/.claude/settings.json`, `CLAUDE_CONFIG_DIR` 이 있으면 그 폴더)을 **백업한 뒤** 이 저장소의 훅을 **추가**한다(기존 훅은 그대로 둔다).
-   - `~/.claude-office/config.json` 이 없으면 만든다. 이 판은 **가짜 직원 4명·일하는 척·스킬 꼬마·팀장 보고(윈도우 알림 포함)를 켠 채로** 만든다. 이미 있으면 건드리지 않는다.
+   - `~/.claude-office/config.json` 이 없으면 만든다. 이 판은 **가짜 직원 6명(9시 출근·18시 퇴근, 그 밖의 시간엔 일이 생길 때만 나옴)·일하는 척·스킬 꼬마·팀장 보고(윈도우 알림 포함)를 켠 채로** 만든다. 근무시간 밖에 설치하면 가짜 직원이 안 보이는 것이 정상이니 그렇게 알려 준다. 이미 있으면 건드리지 않는다.
    - 로컬 서버(127.0.0.1:4777)를 백그라운드로 띄우고 브라우저를 연다.
 3. 결과를 사용자에게 짧게 알린다:
    - 주소: `http://127.0.0.1:4777` (북마크 권장)

@@ -307,6 +307,41 @@ test('lead: 팀장이 일 수만큼 소집·하달하고, 끝나면 한동안 �
   assert.ok(off.people.every((p) => !p.id.startsWith('/guest/') || p.status === 'rest' || p.name !== '팀장')); // lead 미설정: 팀장도 일반 직원
 });
 
+test('guestHours: 근무시간 밖에는 퇴근해 있고, 출퇴근은 한 명씩, 일이 생기면 팀장과 맡을 사람만 다시 나온다', async () => {
+  const base = fresh();
+  const d0 = new Date();
+  const at = (h, m = 0, s = 0) => new Date(d0.getFullYear(), d0.getMonth(), d0.getDate(), h, m, s).getTime(); // 오늘의 현지 시각
+  const cfg = { guests: ['a', 'b', 'c', '팀장'], guestsWork: true, lead: '팀장', guestHours: [9, 18] };
+  const names = async (now) => (await snap(cfg, { now })).people.filter((p) => p.id.startsWith('/guest/')).map((p) => p.name);
+  assert.deepEqual(await names(at(7)), []); // 출근 전
+  assert.deepEqual(await names(at(8, 59, 0)), ['a', 'b']); // 30초 간격으로 한 명씩 먼저 들어온다
+  assert.deepEqual(await names(at(9)), ['a', 'b', 'c', '팀장']); // 정각엔 전원
+  assert.deepEqual(await names(at(17, 59, 59)), ['a', 'b', 'c', '팀장']);
+  assert.deepEqual(await names(at(18)), ['b', 'c', '팀장']); // 6시부터 한 명씩 퇴근
+  assert.deepEqual(await names(at(18, 1, 30)), []);
+  assert.deepEqual((await snap({ ...cfg, guestHours: [] }, { now: at(3) })).people.length, 4); // 근무시간을 안 정하면 항상 있다
+
+  // 밤 8시에 일이 생겼다 — 팀장과 맡을 한 명만 다시 출근
+  const N = at(20);
+  const cwd = folder(base, 'night');
+  transcript(cwd, 'n', [asst(new Date(N - 1000).toISOString(), [read('/x/main.js')], 'tool_use')]);
+  putCard('n', { kind: 'working', cwd, updatedAt: new Date(N - 2000).toISOString(), ...live });
+  const s1 = await snap(cfg, { now: N });
+  const by = (s, n) => s.people.find((p) => p.name === n);
+  assert.deepEqual(s1.people.filter((p) => p.id.startsWith('/guest/')).map((p) => p.name), ['a', '팀장']);
+  assert.deepEqual([by(s1, 'a').status, by(s1, '팀장').status], ['working', 'working']);
+  await snap(cfg, { now: N + 20000 });
+  putCard('n', { kind: 'rest', cwd, updatedAt: new Date(N + 21000).toISOString(), ...live });
+  const s2 = await snap(cfg, { now: N + 21000 }); // 일이 끝났다 — 팀장은 보고, 일한 사람은 잠깐 머문다
+  assert.deepEqual([by(s2, 'a').status, by(s2, '팀장').status], ['rest', 'decision']);
+  assert.deepEqual(await names(N + 12 * 60000), ['팀장']); // 10분 뒤 일한 사람은 다시 퇴근, 팀장은 보고 자세로 남는다
+  ackReport(N + 13 * 60000); // 확인 완료
+  assert.deepEqual(await names(N + 14 * 60000), ['팀장']); // 잠깐 머물다가
+  assert.deepEqual(await names(N + 30 * 60000), []); // 다시 퇴근
+  assert.deepEqual(normalizeConfig({ guestHours: [9, 18] }).guestHours, [9, 18]);
+  for (const bad of [[18, 9], [9], [9, 25], ['9', '18'], '9-18', [-1, 5]]) assert.deepEqual(normalizeConfig({ guestHours: bad }).guestHours, []);
+});
+
 test('skillMinis: 켜면 방금 부른 스킬이 꼬마로 서고, 오래됐거나 꺼져 있으면 없다', async () => {
   const base = fresh();
   const cwd = folder(base, 'skiller');

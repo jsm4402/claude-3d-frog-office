@@ -19,7 +19,21 @@ const IDLE_WORKING_MS = 10 * 60 * 1000; // 훅 카드가 '일하는 중'인데 �
 const LEAD_MIN_WORK_MS = 15_000; // 팀장은 이만큼 이어진 일만 보고한다(깜빡임으로 보고가 터지지 않게)
 const LEAD_REPORT_MS = 30 * 60_000; // 보고 자세(손 든 모양)를 유지하는 시간 — 사용자가 '확인 완료'를 누르면 바로 내린다
 const leadState = { since: 0, n: 0, reportN: 0, head: '', reportUntil: 0, tasks: [], who: [], work: new Map(), src: new Map() };
+const COMMUTE_GAP_S = 30; // 가짜 직원 출퇴근이 문 앞에 몰리지 않게 한 명씩 이만큼 간격을 둔다
+const CALL_LINGER_MS = 10 * 60_000; // 근무시간 밖에 불려 나온 가짜 직원이 일이 끝난 뒤 사무실에 남아 있는 시간(들락날락 방지)
+const callState = { until: new Map() }; // 이름 → 근무시간 밖인데 이 시각까지는 사무실에 있는다
 let reportHandler = null;
+
+/**
+ * 가짜 직원 i(전체 n명 중)가 근무시간이라 사무실에 있는가 — 서버 PC 의 현지 시각 기준.
+ * hours 가 비어 있으면 항상 있다. 출근은 시작 시각까지 한 명씩 먼저 들어오고(마지막 사람이 정각), 퇴근은 끝 시각부터 한 명씩 나간다.
+ */
+export function onShift(hours, now, i = 0, n = 1) {
+  if (!Array.isArray(hours) || hours.length !== 2) return true;
+  const d = new Date(now);
+  const sec = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+  return sec >= hours[0] * 3600 - (n - 1 - i) * COMMUTE_GAP_S && sec < hours[1] * 3600 + i * COMMUTE_GAP_S;
+}
 
 /** '확인 완료' — 손 든 자세를 내린다. 보고 중이었으면 true */
 export function ackReport(now = Date.now()) {
@@ -47,6 +61,7 @@ export function forget() {
   hookCache = { file: '', mtimeMs: -2, value: false };
   lastCleanup = 0;
   Object.assign(leadState, { since: 0, n: 0, reportN: 0, head: '', reportUntil: 0, tasks: [], who: [], work: new Map(), src: new Map() });
+  callState.until.clear();
 }
 
 function git(cwd, args) {
@@ -293,8 +308,12 @@ export async function buildSnapshot(opts = {}) {
     }
   }
   const reporting = lead && now < leadState.reportUntil;
+  // 근무시간(config.guestHours): 시간 밖에는 가짜 직원이 퇴근해 있다. 그래도 일이 생기면 팀장과 맡을 사람만 다시 출근하고,
+  // 일이 끝난 뒤 CALL_LINGER_MS 동안 머물다 다시 퇴근한다. 팀장 보고(파일·알림)는 근무시간과 상관없이 그대로 돈다.
+  const guestList = cfg.guests || [];
   let given = 0;
-  for (const g of cfg.guests || []) {
+  for (let gi = 0; gi < guestList.length; gi++) {
+    const g = guestList[gi];
     if (people.some((p) => nameKey(p.name) === nameKey(g))) continue;
     const isLead = lead && nameKey(g) === nameKey(lead);
     let status = 'rest';
@@ -311,6 +330,11 @@ export async function buildSnapshot(opts = {}) {
     } else if (given < crew) {
       status = 'working';
       doing = tasks[given++] || '';
+    }
+    if (onShift(cfg.guestHours, now, gi, guestList.length)) callState.until.delete(g);
+    else {
+      if (status !== 'rest') callState.until.set(g, now + CALL_LINGER_MS); // 불려 나왔다
+      if (!((callState.until.get(g) || 0) > now)) continue; // 퇴근해 있다
     }
     people.push({
       id: `/guest/${g}`, name: g, path: `/guest/${g}`, status, pending: status === 'decision' ? 1 : 0, ask, sessions: 1,

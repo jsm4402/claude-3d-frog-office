@@ -12,6 +12,7 @@ export const DEFAULTS = Object.freeze({
   guests: [],
   skillMinis: false,
   guestsWork: false,
+  guestHours: [],
   lead: '',
   notify: false,
   reportDir: '',
@@ -49,6 +50,11 @@ export function normalizeConfig(raw) {
     skillMinis: c.skillMinis === true,
     // 켜면 진짜 일(일하는 직원·서브에이전트·스킬)이 생길 때 가짜 직원이 차례로 맡아 일하는 척한다
     guestsWork: c.guestsWork === true,
+    // 가짜 직원 근무시간 [출근 시, 퇴근 시] — 예: [9, 18]. 서버 PC 의 현지 시각, 소수(8.5 = 8시 30분) 가능. 비우면 항상 출근해 있다
+    guestHours: Array.isArray(c.guestHours) && c.guestHours.length === 2 && c.guestHours.every((x) => Number.isFinite(x))
+      && c.guestHours[0] >= 0 && c.guestHours[1] <= 24 && c.guestHours[0] < c.guestHours[1]
+      ? [c.guestHours[0], c.guestHours[1]]
+      : [],
     lead: typeof c.lead === 'string' ? c.lead.trim().slice(0, 24) : '',
     notify: c.notify === true,
     reportDir: typeof c.reportDir === 'string' ? c.reportDir.trim().slice(0, 260) : '',
@@ -100,19 +106,20 @@ export function demoPort(cfg = loadConfig()) {
 }
 
 /**
- * 처음 설치할 때 켜 두는 구성 — 가짜 직원 4명·일하는 척·스킬 꼬마·팀장 보고(알림 포함).
+ * 처음 설치할 때 켜 두는 구성 — 가짜 직원 6명(9시 출근·18시 퇴근)·일하는 척·스킬 꼬마·팀장 보고(알림 포함).
  * 코드 기본값(DEFAULTS)은 꺼짐 그대로다: config.json 이 없거나 깨지면 아무것도 켜지지 않는다.
  */
 export const STARTER = Object.freeze({
-  guests: Object.freeze(['김대리', '박과장', '이인턴', '최팀장']),
+  guests: Object.freeze(['김대리', '박과장', '이인턴', '정주임', '강사원', '최팀장']),
   skillMinis: true,
   guestsWork: true,
+  guestHours: Object.freeze([9, 18]),
   lead: '최팀장',
   notify: true,
 });
 
 /** setup 이 처음 만들어 두는 config.json 내용 — 기본값 위에 STARTER 를 얹는다 */
 export function defaultConfigText() {
-  const { port, autoStart, homes, hide, guests, skillMinis, guestsWork, lead, notify, reportDir, fallbackMinutes, staleHours, kidCommits, lang } = { ...DEFAULTS, ...STARTER };
-  return JSON.stringify({ port, autoStart, homes, hide, guests, skillMinis, guestsWork, lead, notify, reportDir, fallbackMinutes, staleHours, kidCommits, lang }, null, 2) + '\n';
+  const { port, autoStart, homes, hide, guests, skillMinis, guestsWork, guestHours, lead, notify, reportDir, fallbackMinutes, staleHours, kidCommits, lang } = { ...DEFAULTS, ...STARTER };
+  return JSON.stringify({ port, autoStart, homes, hide, guests, skillMinis, guestsWork, guestHours, lead, notify, reportDir, fallbackMinutes, staleHours, kidCommits, lang }, null, 2) + '\n';
 }

@@ -53,7 +53,8 @@ test('setup → status → start → demo → stop → uninstall', () => {
   assert.deepEqual(installedEvents(settings), EVENTS); // settings.json 이 없어도 새로 만든다
   assert.ok(fs.existsSync(path.join(tmp, 'home', 'config.json')));
   const made = JSON.parse(fs.readFileSync(path.join(tmp, 'home', 'config.json'), 'utf8')); // 처음 설치는 가짜 직원·팀장 보고가 켜진 채로
-  assert.equal(made.guests.length, 4);
+  assert.equal(made.guests.length, 6);
+  assert.deepEqual(made.guestHours, [9, 18]); // 9시 출근·18시 퇴근
   assert.ok(made.guests.includes(made.lead));
   assert.deepEqual([made.guestsWork, made.skillMinis, made.notify], [true, true, true]);
   assert.match(r.stdout, /team-lead report/); // 보고 파일이 쌓인다는 걸 설치 때 알린다

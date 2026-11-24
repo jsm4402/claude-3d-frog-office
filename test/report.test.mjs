@@ -46,6 +46,8 @@ test('config: 처음 만드는 config.json 은 가짜 직원·팀장 보고가 �
   assert.deepEqual(made.guests, [...STARTER.guests]);
   assert.ok(made.guests.includes(made.lead));
   assert.deepEqual([made.guestsWork, made.skillMinis, made.notify], [true, true, true]);
+  assert.deepEqual(made.guestHours, [9, 18]);
+  assert.deepEqual(normalizeConfig({}).guestHours, []);
   const bare = normalizeConfig({}); // 파일이 없거나 깨졌을 때
   assert.deepEqual([bare.guests.length, bare.lead, bare.guestsWork, bare.skillMinis, bare.notify], [0, '', false, false, false]);
 });

@@ -79,6 +79,11 @@ say(`완료: 3D 사무실 ${url} — ${hookKo}. 이미 열려 있던 Claude 세�
 // 가짜 직원·팀장 보고가 켜져 있는지, 보고 파일이 어디에 쌓이는지 알린다(대화 요약이 파일로 남으니 숨기지 않는다)
 const cfg = loadConfig();
 if (cfg.lead && cfg.guests.includes(cfg.lead)) {
+  const hrs = cfg.guestHours.length === 2 ? cfg.guestHours : null;
+  if (hrs) {
+    say(`가짜 직원은 ${hrs[0]}시에 출근하고 ${hrs[1]}시에 퇴근합니다(그 밖의 시간에는 일이 생길 때만 나옵니다). 항상 있게 하려면 config.json 의 "guestHours" 를 [] 로 바꾸세요.`,
+      `Guests are in from ${hrs[0]}:00 to ${hrs[1]}:00 local time (outside those hours they only come in when there is work). Set "guestHours" to [] to keep them in all day.`);
+  }
   say(`가짜 직원 ${cfg.guests.length}명과 팀장 보고(${cfg.lead})가 켜져 있습니다. 일이 끝나면 작업 요약이 ${reportDir(cfg)} 에 파일로 쌓입니다${cfg.notify ? ' (윈도우 알림 포함)' : ''}. 내 컴퓨터 밖으로는 나가지 않습니다. 끄려면 ${configFile()} 에서 "lead" 를 "" 로 바꾸세요.`,
     `${cfg.guests.length} guest employees and the team-lead report (${cfg.lead}) are on. When work finishes, a summary is appended to a file in ${reportDir(cfg)}${cfg.notify ? ' (with a Windows notification)' : ''}. Nothing leaves this computer. To turn it off, set "lead" to "" in ${configFile()}.`);
 } else if (cfgExists) {

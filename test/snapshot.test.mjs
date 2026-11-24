@@ -385,7 +385,8 @@ test('git 저장소: 하위 폴더 세션도 루트로 묶이고, 커밋이 적�
   assert.equal(p.commits, 3);
   assert.equal(p.kid, true);
   assert.equal(p.name, 'tiny');
-  assert.equal(fs.realpathSync(p.id), fs.realpathSync(repo));
+  // native: 윈도우의 짧은 경로 이름(RUNNER~1)과 긴 이름을 같은 폴더로 본다 — 임시 폴더가 짧은 이름으로 잡히는 기계에서 깨졌다
+  assert.equal(fs.realpathSync.native(p.id), fs.realpathSync.native(repo));
 });
 
 test('청소: 하루 넘은 ended 카드·7일 넘은 카드 파일을 치운다', () => {

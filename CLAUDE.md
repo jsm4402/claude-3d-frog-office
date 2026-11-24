@@ -13,6 +13,7 @@
 | "상태 봐줘", "안 보여", "doctor", "status" | `node scripts/status.mjs` 결과를 읽고 아래 **문제 해결** 참고 |
 | "데모 보여줘", "demo" | `node scripts/start.mjs --demo --open` (가짜 데이터, 실제 세션과 무관) |
 | "지워줘", "제거", "uninstall" | `node scripts/uninstall.mjs` (상태 폴더까지 지우려면 `--purge`) |
+| "가짜 직원 넣어줘", "팀장 보고 켜줘", "알림 켜줘" | `~/.claude-office/config.json` 의 `guests`·`guestsWork`·`skillMinis`·`lead`·`notify`·`reportDir` 를 고친다(뜻은 README 의 **이 판에서 더한 것**). 이름은 사용자에게 물어 정하고, `lead` 는 `guests` 안의 이름이어야 한다. 팀장 보고를 켜면 대화 기록 요약이 내 PC 폴더에 파일로 쌓인다는 점을 먼저 알린다 |
 
 ## 설치 절차
 

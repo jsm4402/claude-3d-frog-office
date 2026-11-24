@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { buildSnapshot, cardStatus, forget as forgetSnap, transcriptStatus } from '../server/snapshot.mjs';
+import { buildSnapshot, cardStatus, forget as forgetSnap, transcriptStatus, setReportHandler, ackReport } from '../server/snapshot.mjs';
 import { forget as forgetAct } from '../server/activity.mjs';
 import { forget as forgetSess, cleanupCards } from '../server/sessions.mjs';
 import { cardAlive, parseStarts } from '../server/liveness.mjs';
@@ -113,6 +113,11 @@ test('보정: 결재 뒤 대화가 움직였으면 working, 끊김·턴 끝·API
   assert.equal(cardStatus({ kind: 'working', updatedAt: at(10000) }, last({ endTurn: true, at: now - 2000 }), now), 'working'); // 5초 안
   assert.equal(cardStatus({ kind: 'working', updatedAt: at(10000) }, last({ apiError: true, at: now - 1000 }), now), 'rest');
   assert.equal(cardStatus({ kind: 'weird', updatedAt: at(1) }, null, now), 'rest');
+  // Stop 훅 누락: 10분 넘게 조용하면 쉬는 중, 최근 움직임이 있으면 계속 일하는 중, 승인 대기는 그대로
+  assert.equal(cardStatus({ kind: 'working', updatedAt: at(4 * 3600000) }, last({ type: 'user', at: now - 4 * 3600000 }), now, now - 4 * 3600000), 'rest');
+  assert.equal(cardStatus({ kind: 'working', updatedAt: at(4 * 3600000) }, last({ type: 'user', at: now - 30000 }), now, now - 30000), 'working');
+  assert.equal(cardStatus({ kind: 'working', updatedAt: at(4 * 3600000) }, null, now, 0), 'rest');
+  assert.equal(cardStatus({ kind: 'decision', updatedAt: at(4 * 3600000) }, last({ type: 'user', at: now - 4 * 3600000 }), now, now - 4 * 3600000), 'decision');
   assert.equal(transcriptStatus(last({ type: 'user', at: now - 1000 }), now - 1000, now), 'working');
   assert.equal(transcriptStatus(last({ type: 'user', at: now - 11 * 60000 }), now - 11 * 60000, now), 'rest');
   assert.equal(transcriptStatus(last({ endTurn: true, at: now }), now, now), 'rest');
@@ -157,6 +162,20 @@ test('숨김·homes·이름 겹침', async () => {
   forgetSnap();
   const s2 = await snap({ hide: [b] });
   assert.equal(s2.people.filter((p) => p.name === 'app').length, 1); // 겹침이 풀리면 이름도 원래대로
+});
+
+test('guests: 가짜 직원은 항상 쉬는 상태로 나오고, 같은 이름의 진짜 직원이 있으면 만들지 않는다', async () => {
+  const base = fresh();
+  const real = folder(base, 'realwork');
+  transcript(real, 'rw', [asst(iso(1000), [read('/x/y')], 'tool_use')]);
+  putCard('rw', { kind: 'working', cwd: real, updatedAt: iso(2000), ...live });
+  const s = await snap({ guests: ['김대리', ' 박과장 ', '김대리', 'realwork', '', 7] });
+  const guests = s.people.filter((p) => p.id.startsWith('/guest/'));
+  assert.deepEqual(guests.map((p) => p.name).sort(), ['김대리', '박과장']); // 중복·빈 값·숫자·진짜와 같은 이름은 빠진다
+  assert.ok(guests.every((p) => p.status === 'rest' && p.pending === 0 && p.subCount === 0 && p.log.length === 0));
+  assert.equal(s.people.filter((p) => p.name === 'realwork').length, 1);
+  assert.equal(normalizeConfig({ guests: Array.from({ length: 30 }, (_, i) => `g${i}`) }).guests.length, 12); // 최대 12명
+  assert.deepEqual(normalizeConfig({ guests: 'x' }).guests, []);
 });
 
 test('대체 모드: 카드 없는 최근 대화도 보이고, ended 카드는 숨기고 대체 모드도 막는다', async () => {
@@ -230,6 +249,82 @@ test('서브에이전트가 subs·subCount 로 나온다(12명 상한)', async (
   assert.equal(p.subs.length, 12);
   assert.equal(p.subs[0].type, 'Explore');
   assert.equal(p.subs[0].doing.k, 'read');
+});
+
+test('guestsWork: 켜면 진짜 일이 가짜 직원에게 차례로 하달되고, 꺼져 있으면 계속 쉰다', async () => {
+  const base = fresh();
+  const cwd = folder(base, 'boss2');
+  const f = transcript(cwd, 'g', [asst(iso(1000), [read('/x/main.js')], 'tool_use')]);
+  putCard('g', { kind: 'working', cwd, updatedAt: iso(2000), ...live });
+  const dir = path.join(f.replace(/\.jsonl$/, ''), 'subagents');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'agent-s1.jsonl'), JSON.stringify(asst(iso(500), [read('/x/sub.js')], 'tool_use')) + '\n');
+  fs.writeFileSync(path.join(dir, 'agent-s1.meta.json'), JSON.stringify({ agentType: 'Explore', description: 'dig' }));
+  const guestsOf = (s) => s.people.filter((p) => p.id.startsWith('/guest/'));
+  const off = guestsOf(await snap({ guests: ['a', 'b', 'c'] }));
+  assert.ok(off.every((g) => g.status === 'rest'));
+  forgetSnap();
+  const on = guestsOf(await snap({ guests: ['a', 'b', 'c'], guestsWork: true }));
+  assert.deepEqual(on.map((g) => g.status), ['working', 'working', 'rest']); // 일 2건(직원 1 + 서브에이전트 1) → 가짜 2명
+  assert.equal(on[0].doing.k, 'read');
+  assert.equal(on[1].doing.a, 'sub.js');
+  assert.equal(on[2].doing, '');
+});
+
+test('lead: 팀장이 일 수만큼 소집·하달하고, 끝나면 한동안 보고 자세를 취했다가 쉰다', async () => {
+  const base = fresh();
+  const cwd = folder(base, 'boss3');
+  transcript(cwd, 'l', [asst(iso(1500), [{ type: 'tool_use', name: 'Edit', input: { file_path: '/x/a.js' } }], 'tool_use'), asst(iso(1000), [read('/x/main.js')], 'tool_use')]);
+  putCard('l', { kind: 'working', cwd, updatedAt: iso(2000), ...live });
+  const cfg = { guests: ['팀장', 'a', 'b'], guestsWork: true, lead: '팀장' };
+  const T = Date.now();
+  const got = [];
+  setReportHandler((x) => got.push(x));
+  const by = (s, n) => s.people.find((p) => p.name === n);
+  const s1 = await snap(cfg, { now: T });
+  assert.equal(by(s1, '팀장').status, 'working');
+  assert.match(by(s1, '팀장').doing.a, /1건 하달 · 1명 소집/);
+  assert.deepEqual([by(s1, 'a').status, by(s1, 'b').status], ['working', 'rest']); // 일 1건 → 소집 1명
+  await snap(cfg, { now: T + 20000 }); // 15초 넘게 이어진 일
+  putCard('l', { kind: 'rest', cwd, updatedAt: new Date(T + 21000).toISOString(), ...live });
+  const s3 = await snap(cfg, { now: T + 21000 });
+  assert.equal(by(s3, '팀장').status, 'decision');
+  assert.match(by(s3, '팀장').ask, /보고드립니다 — 업무 1건 끝났습니다/);
+  assert.equal(by(s3, 'a').status, 'rest');
+  assert.equal(by(s3, '팀장').lead, true);
+  const s4 = await snap(cfg, { now: T + 21000 + 100000 });
+  assert.equal(by(s4, '팀장').status, 'decision'); // 확인 전에는 손을 계속 들고 있다
+  assert.equal(ackReport(T + 22000 + 100000), true); // 확인 완료
+  assert.equal(by(await snap(cfg, { now: T + 23000 + 100000 }), '팀장').status, 'rest');
+  assert.equal(ackReport(T + 24000 + 100000), false); // 이미 내린 뒤엔 할 일 없음
+  assert.equal(got.length, 1); // 보고는 딱 한 번
+  assert.equal(got[0].n, 1);
+  assert.deepEqual(got[0].who, ['boss3']);
+  assert.deepEqual(got[0].sections[0].files, [{ name: 'a.js', kind: 'edit' }]); // 직원별 요약 구역
+  setReportHandler(null);
+  forgetSnap();
+  const off = await snap({ guests: ['팀장', 'a'], guestsWork: true }, { now: T });
+  assert.ok(off.people.every((p) => !p.id.startsWith('/guest/') || p.status === 'rest' || p.name !== '팀장')); // lead 미설정: 팀장도 일반 직원
+});
+
+test('skillMinis: 켜면 방금 부른 스킬이 꼬마로 서고, 오래됐거나 꺼져 있으면 없다', async () => {
+  const base = fresh();
+  const cwd = folder(base, 'skiller');
+  const skill = (name) => ({ type: 'tool_use', name: 'Skill', input: { skill: name } });
+  transcript(cwd, 's', [
+    asst(iso(300000), [skill('old-skill')], 'tool_use'),
+    asst(iso(30000), [skill('pdf')], 'tool_use'),
+    asst(iso(20000), [skill('pdf')], 'tool_use'),
+    asst(iso(10000), [skill('docx')], 'tool_use'),
+  ]);
+  putCard('s', { kind: 'working', cwd, updatedAt: iso(2000), ...live });
+  const [off] = (await snap({ skillMinis: false })).people;
+  assert.equal(off.subCount, 0); // 꺼져 있으면 기존 동작 그대로
+  forgetSnap();
+  const [on] = (await snap({ skillMinis: true })).people;
+  assert.deepEqual(on.subs.map((x) => x.desc), ['pdf', 'docx']); // 5분 전 old-skill 은 빠지고 pdf 연속 호출은 한 명
+  assert.ok(on.subs.every((x) => x.type === 'Skill'));
+  assert.equal(on.subCount, 2);
 });
 
 test('git 저장소: 하위 폴더 세션도 루트로 묶이고, 커밋이 적으면 kid', async (t) => {

@@ -5,7 +5,7 @@
 const OfficePanel = (() => {
   const $ = id => document.getElementById(id);
   const t = (k, v) => I18N.t(k, v);
-  const P = { people: [], sel: null, items: [], seen: new Set(), queue: [], primed: false, pick: null };
+  const P = { people: [], sel: null, items: [], seen: new Set(), queue: [], primed: false, pick: null, report: null, reportAt: 0 };
   const LOG_MAX = 60;
 
   // 화면의 상태 = 승인 대기 > 일(본체가 쉬어도 서브에이전트가 일하면 일하는 중) > 쉼 — office-life.js 와 같은 잣대
@@ -50,7 +50,67 @@ const OfficePanel = (() => {
       if (more > 0) ul.append(el("li", "o-submore", t("d.more", { n: more })));
       box.append(ul);
     }
+    if (d.lead) {                                    // 팀장: 가장 최근 보고서를 펼쳐 보여 준다
+      box.append(el("p", "o-k o-subhead", "최근 보고"));
+      box.append(reportView(P.report));
+      loadReport();
+    }
     return box;
+  }
+  // 확인 완료 — 누르면 팀장이 손을 내리고 보고서에 확인 시각이 남는다(사무실 화면에서 서버로 가는 유일한 쓰기)
+  function ackRow(r) {
+    const row = el("p", "o-report-ack");
+    if (r.acked) { row.append(el("span", "o-chip rest", "확인 완료 " + r.acked)); return row; }
+    const b = el("button", "o-ackbtn", "확인 완료");
+    b.type = "button";
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const res = await fetch("/api/report/ack", { method: "POST", headers: { "x-office-ack": "1" } });
+        const j = await res.json();
+        if (j.report) { P.report = j.report; render(P.people, P.sel); }
+      } catch { b.disabled = false; }
+    };
+    row.append(b);
+    return row;
+  }
+  // 보고서 — 직원(프로젝트)별로 결과·파일·쓴 도구·작업 흐름을 한눈에. 구역이 없는 옛 보고는 글 그대로 보여 준다
+  function reportView(r) {
+    const box = el("div", "o-reportbox");
+    if (!r) { box.append(el("p", "o-report-empty", "아직 보고가 없습니다")); return box; }
+    const head = el("p", "o-report-head", (r.text.split("\n")[0] || "").replace(/^##\s*/, ""));
+    box.append(head, ackRow(r));
+    if (!r.sections || !r.sections.length) { box.append(el("pre", "o-report", r.text)); return box; }
+    for (const s of r.sections) {
+      const sec = el("div", "o-report-sec");
+      sec.append(el("b", "o-report-who", s.who + (s.minutes ? " · 약 " + s.minutes + "분" : "")));
+      const row = (k, v, cls) => { if (v) { const p = el("p", "o-report-row" + (cls ? " " + cls : "")); p.append(el("span", "o-k", k), el("span", null, " " + v)); sec.append(p); } };
+      row("요청", s.request ? s.request + (s.requests && s.requests.length > 1 ? " (외 " + (s.requests.length - 1) + "건)" : "") : "");
+      row("결과", s.result, "o-report-long");
+      if (s.notes && s.notes.length) {
+        sec.append(el("p", "o-k o-report-row", "진행 과정"));
+        const ol = el("ol", "o-report-notes");
+        for (const n of s.notes) ol.append(el("li", null, n));
+        sec.append(ol);
+      }
+      row("바뀐 파일 " + (s.fileCount || 0) + "개", (s.files || []).map(f => f.name + (f.kind === "write" ? "(새로)" : "")).join(", ") + (s.fileCount > (s.files || []).length ? " 외" : ""));
+      row("쓴 도구", [s.skills.length ? "스킬 " + s.skills.join(", ") : "", s.agents.length ? "에이전트 " + s.agents.join(", ") : "", s.tools.length ? "외부 " + s.tools.join(", ") : ""].filter(Boolean).join(" / "));
+      row("작업 흐름", s.flow.join(" → ") + (s.cmds > s.flow.length ? " (명령 " + s.cmds + "번)" : ""));
+      const c = s.counts || {};
+      row("활동량", [["read", "읽기"], ["edit", "수정"], ["write", "새 파일"], ["bash", "명령"], ["find", "찾기"], ["web", "웹"], ["agent", "에이전트"], ["mcp", "외부 연결"]].filter(([k]) => c[k]).map(([k, l]) => l + " " + c[k]).join(" · "));
+      box.append(sec);
+    }
+    return box;
+  }
+  // 보고서는 팀장을 펼쳤을 때만, 5초에 한 번 서버에서 읽는다
+  async function loadReport() {
+    if (Date.now() - P.reportAt < 5000) return;
+    P.reportAt = Date.now();
+    try {
+      const r = await (await fetch("/api/report", { cache: "no-store" })).json();
+      const next = r.report || null, key = x => (x ? x.at + "|" + (x.acked || "") + "|" + x.text : "");
+      if (key(next) !== key(P.report)) { P.report = next; render(P.people, P.sel); }
+    } catch { /* 서버가 잠깐 바쁘면 다음에 */ }
   }
   function item(d) {
     const open = d.id === P.sel, mode = modeOf(d), cls = STATUS[mode];
@@ -85,8 +145,11 @@ const OfficePanel = (() => {
     const sorted = [...P.people].sort((a, b) => (order[modeOf(a)] ?? 2) - (order[modeOf(b)] ?? 2) || a.name.localeCompare(b.name));
     $("office-count").textContent = t("count", { n: sorted.length, w: sorted.filter(p => modeOf(p) === "working").length });
     const keep = list.scrollTop;
+    // 목록은 3초마다 새로 그려진다 — 보고서 칸처럼 안쪽에서 스크롤되는 곳도 읽던 위치를 기억했다가 되돌린다
+    const inner = [...list.querySelectorAll(".o-reportbox, pre.o-report")].map(e => e.scrollTop);
     list.replaceChildren(...sorted.map(item));
     list.scrollTop = keep;
+    list.querySelectorAll(".o-reportbox, pre.o-report").forEach((e, i) => { if (inner[i]) e.scrollTop = inner[i]; });
     if (o.focus && P.sel) {
       const li = list.querySelector(`li[data-id="${CSS.escape(P.sel)}"]`);
       if (li) {

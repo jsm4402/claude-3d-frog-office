@@ -113,3 +113,17 @@ button { font: inherit; color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+.o-report { margin: 2px 0 4px; padding: 6px 8px; max-height: 180px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 12px/1.5 inherit; background: rgba(20, 30, 25, .06); border-radius: 6px; }
+.o-report-head { margin: 0 0 4px; font-weight: 600; color: var(--ink); }
+.o-report-sec { margin: 0 0 8px; padding: 6px 8px; background: rgba(20, 30, 25, .06); border-radius: 6px; }
+.o-report-who { display: block; margin-bottom: 2px; }
+.o-report-row { margin: 0 0 2px; font-size: 12.5px; line-height: 1.5; word-break: break-word; }
+.o-report-empty { color: var(--ink2); }
+.o-report-ack { margin: 0 0 6px; }
+.o-ackbtn { font: inherit; font-size: 12.5px; padding: 3px 12px; border: 0; border-radius: 999px; background: var(--ask); color: #fff; cursor: pointer; }
+.o-ackbtn:disabled { opacity: .5; cursor: default; }
+.o-reportbox { max-height: 62vh; overflow: auto; padding-right: 2px; }
+.o-report-long span:last-child { white-space: pre-wrap; }
+.o-report-notes { margin: 0 0 3px; padding-left: 20px; font-size: 12.5px; line-height: 1.5; }
+.o-report-notes li { margin: 0 0 2px; word-break: break-word; }

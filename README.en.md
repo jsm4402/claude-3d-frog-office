@@ -16,6 +16,8 @@ One office scene shows who is working, who is taking a break, and who is waiting
   <sub>Click to download the 16-second promo video with sound (mp4, Korean captions) · made by AutoFrog Studio · recorded in our in-house terminal app</sub>
 </p>
 
+> **This is a modified edition.** The original is [d-onworks/claude-3d-frog-office](https://github.com/d-onworks/claude-3d-frog-office). This edition adds decorative guest employees, scripted small talk, skill minis and a team-lead report. Guests, skill minis and the report are off by default; only the small-talk style and a 10-minute idle rule change without any config. Details are in the [Korean README](README.md#이-판에서-더한-것); the additions have only been tried on Windows and their on-screen text is Korean.
+
 ## The more sessions you open, the more you miss
 
 With just three or four Claude Code sessions open, this starts to happen:
@@ -31,7 +33,7 @@ Claude 3D Frog Office turns all of that into a single office scene. Each running
 All you need is [Claude Code](https://code.claude.com/docs/en/overview) and Node.js 18+. No `npm install`.
 
 ```bash
-git clone https://github.com/d-onworks/claude-3d-frog-office.git
+git clone https://github.com/jsm4402/claude-3d-frog-office.git
 cd claude-3d-frog-office
 claude
 ```

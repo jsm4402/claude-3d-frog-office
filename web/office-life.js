@@ -75,7 +75,7 @@ const OfficeLife = (() => {
   // ---------- 자리 ----------
   function release(p) {
     for (const [k, who] of L.taken) if (who === p.id) L.taken.delete(k);
-    if (modeOf(p) === "rest") L.desks.delete(p.id);        // 쉬는 사람은 책상을 붙잡지 않는다(일할 사람 몫)
+    if (modeOf(p) === "rest" && !p.lead) L.desks.delete(p.id);   // 쉬는 사람은 책상을 붙잡지 않는다(일할 사람 몫) — 팀장 자리만 늘 그대로
   }
   // 그 자리에 누가 앉아 있거나 지금 그리로 가는 중인가 — 같은 의자에 둘이 겹쳐 앉지 않게
   const goalOf = q => (q.path.length ? q.path[q.path.length - 1] : [q.x, q.y]);
@@ -109,7 +109,20 @@ const OfficeLife = (() => {
     }
     return true;
   }
+  // 팀장 자리 — 항상 같은 책상(줄 끝이라 오른쪽 서브에이전트 줄이 막히지 않는다). 일할 때도 쉴 때도 여기에 앉는다
+  const LEAD_DESK = 3;
+  function reserveLead(p) {
+    const moved = [];
+    for (const [n, k] of [...L.desks]) {
+      if (k !== LEAD_DESK || n === p.id) continue;
+      L.desks.delete(n);                                          // 그 자리를 쓰던 사람은 다른 책상으로
+      moved.push(L.people.get(n));
+    }
+    L.desks.set(p.id, LEAD_DESK);                                 // 먼저 내 자리를 잡아 둔 뒤 밀려난 사람을 다시 앉힌다
+    for (const q of moved) if (q && !q.leaving && modeOf(q) === "work") choose(q);
+  }
   function deskOf(p) {
+    if (p.lead) { reserveLead(p); return OFFICE_DESKS[LEAD_DESK]; }
     const cur = L.desks.get(p.id);
     const lost = cur < 0 && occupied(sitAt(OFFICE_OVERFLOW[-1 - cur].seat, SIT_DESK), p);   // 비운 사이 누가 앉았다
     if (cur === undefined || (cur >= 0 && !deskOk(cur, p)) || lost) {
@@ -183,8 +196,8 @@ const OfficeLife = (() => {
 
   // 쉬는 사람 규칙: 기본은 앉아 있기(소파·탕비실·회의실·빈 책상). 서서 돌아다니는 사람은 한꺼번에 3명까지 —
   // 이미 2명이 돌아다니면 나머지는 앉을 일만 고른다. 앉았다 일어났다는 무작위로.
-  const SIT = [["sofa", 14], ["cafe", 12], ["chatSit", 14], ["meeting", 9], ["read", 7], ["deskrest", 9]];
-  const MOVE = [["coffee", 12], ["chat", 8], ["phone", 5], ["stretch", 3], ["server", 3], ["stroll", 6]];
+  const SIT = [["sofa", 14], ["cafe", 12], ["chatSit", 30], ["meeting", 9], ["read", 7], ["deskrest", 9]];
+  const MOVE = [["coffee", 12], ["chat", 16], ["phone", 5], ["stretch", 3], ["server", 3], ["stroll", 6]];
   const ROAM_MAX = 3;
   // 휴대폰 만지작 — 앉은 자리는 처음부터 휴대폰을 보는 경우도 있고(PHONE_START), 앉아 있다가 가끔 꺼내
   // 보기도 한다(섞기 표).
@@ -202,6 +215,7 @@ const OfficeLife = (() => {
   const roaming = except => [...L.people.values()]
     .filter(q => q !== except && !q.leaving && modeOf(q) === "rest" && !q.seated).length;
   function rest(p) {
+    if (p.lead) { p.seated = true; if (ACTS.deskrest(p)) return; }   // 팀장은 쉴 때도 자기 자리를 지킨다
     const pool = roaming(p) >= ROAM_MAX - 1 || Math.random() < 0.7 ? SIT : MOVE;
     const total = pool.reduce((n, r) => n + r[1], 0);
     for (let tries = 0; tries < 5; tries++) {
@@ -321,7 +335,7 @@ const OfficeLife = (() => {
 
   // ---------- 수다 — 두세 명이 둘러서서 번갈아 말한다 ----------
   function free(q) {
-    return !q.leaving && !q.chat && modeOf(q) === "rest";
+    return !q.leaving && !q.chat && modeOf(q) === "rest" && !q.lead;
   }
   function startChat(p, sit) {
     const busy = new Set([...L.chats].map(c => c.spot));
@@ -368,9 +382,13 @@ const OfficeLife = (() => {
       return;
     }
     if (L.t < c.next) return;
+    if (!c.script) {                                     // 주고받는 대본 한 편 — "A|B|C" 를 차례로 말한다
+      c.script = line("convo").split("|");
+      c.lines = c.script.length;
+    }
     if (c.said >= c.lines || here.length < 2) return endChat(c, true);
-    const speaker = pick(here.filter(q => q !== c.last)) || here[0];
-    const said = line("talk");
+    const order = c.members.filter(q => here.includes(q)), speaker = order[c.said % order.length];
+    const said = c.script[c.said] || line("talk");
     say(speaker, said, 2.3);
     speaker.over = { pose: c.spot.sit ? "sofaTalk" : (Math.random() < 0.75 ? "talk" : "wave"), until: L.t + 2.2 };
     const cx = here.reduce((n, q) => n + q.x, 0) / here.length;
@@ -425,7 +443,8 @@ const OfficeLife = (() => {
       const wasDesk = L.desks.get(p.id);
       Object.assign(p, { name: d.name, status: d.status, ask: d.ask || "", kid: !!d.kid, home: d.home || null,
                          doing: d.doing || "", subCount: d.subCount || 0, subs: d.subs || [], commits: d.commits,
-                         path0: d.path });
+                         path0: d.path, lead: !!d.lead });
+      if (p.lead && L.desks.get(p.id) !== LEAD_DESK) reserveLead(p);
       if (fresh) {
         if (L.synced) {                              // 나중에 켠 세션 = 문으로 출근
           p.x = OFFICE_NODES.out[0]; p.y = OFFICE_NODES.out[1]; p.alpha = 0;
@@ -446,7 +465,7 @@ const OfficeLife = (() => {
         else if (modeOf(p) === "work" && wasMode !== "work") event(p, "subwork");
         else if (wasMode === "work" && modeOf(p) === "rest") { event(p, "done"); p.over = { pose: "cheer", until: L.t + 1.4 }; }
         choose(p);
-      } else if (modeOf(p) === "work" && wasDesk >= 0 && !deskOk(wasDesk, p)) {
+      } else if (modeOf(p) === "work" && !p.lead && wasDesk >= 0 && !deskOk(wasDesk, p)) {
         choose(p);                                 // 서브에이전트가 생겼는데 옆자리가 막혔다 — 넓은 자리로 옮겨 앉는다
       }
       if (modeOf(p) === "work" && p.doing && p.doing !== wasDoing) { say(p, p.doing, 4, "work"); p.nextSay = L.t + rnd(6, 10); }

@@ -88,6 +88,18 @@ test('GET 외 405, CORS 헤더 없음', async () => {
   assert.equal(r.headers['access-control-allow-origin'], undefined);
 });
 
+process.env.CLAUDE_OFFICE_REPORT_DIR = path.join(os.tmpdir(), 'office-report-test'); // 실제 보고 폴더를 건드리지 않게
+
+test('확인 완료: POST 는 /api/report/ack 에 사용자 지정 헤더가 있을 때만, 나머지는 그대로 막힌다', async () => {
+  assert.equal((await req(port, '/api/report/ack', { method: 'POST' })).status, 403); // 헤더 없음(다른 사이트의 몰래 요청)
+  assert.equal((await req(port, '/api/report/ack', { method: 'POST', headers: { 'x-office-ack': '0' } })).status, 403);
+  assert.equal((await req(port, '/api/report/ack', { method: 'POST', host: 'evil.com', headers: { 'x-office-ack': '1' } })).status, 403);
+  const ok = await req(port, '/api/report/ack', { method: 'POST', headers: { 'x-office-ack': '1' } });
+  assert.equal(ok.status, 200);
+  assert.equal((await req(port, '/api/office', { method: 'POST', headers: { 'x-office-ack': '1' } })).status, 405); // 다른 경로는 여전히 보기 전용
+  assert.equal((await req(port, '/api/report/ack', { method: 'GET' })).status, 404); // GET 으로는 못 누른다
+});
+
 test('정적 파일: 목록에 있는 것만, 경로조작·_ 파일·숨김 파일은 404', async () => {
   const ok = await req(port, '/office/frog.webp');
   assert.equal(ok.status, 200);

@@ -8,12 +8,30 @@ import { cardAlive, processStarts } from './liveness.mjs';
 import { cleanupCards, mtimeOf, readCards, recentTranscripts, transcriptFor } from './sessions.mjs';
 import { LOG_N, MAX_SUBS, oneLine, readTranscript, runningSubagents } from './activity.mjs';
 import { installedEvents } from './hooks-config.mjs';
+import { absorb, sectionsOf } from './report.mjs';
 
 export const API_VERSION = 1;
 const GIT_TTL_MS = 10 * 60 * 1000; // 루트·커밋 수는 10분 캐시 — git 을 3초마다 두드리지 않게
 const ANSWERED_MS = 1500; // 결재 카드보다 대화가 이만큼 뒤에 움직였으면 사용자가 답한 것
 const END_QUIET_MS = 5000; // end_turn 뒤 이만큼 조용하면 쉬는 중(Esc·Stop 훅 누락 대비)
 const FALLBACK_WORKING_MS = 10 * 60 * 1000; // 대체 모드: 이만큼 조용하면 일 안 하는 것으로 본다
+const IDLE_WORKING_MS = 10 * 60 * 1000; // 훅 카드가 '일하는 중'인데 이만큼 조용하면 쉬는 중(Stop 훅 누락 대비)
+const LEAD_MIN_WORK_MS = 15_000; // 팀장은 이만큼 이어진 일만 보고한다(깜빡임으로 보고가 터지지 않게)
+const LEAD_REPORT_MS = 30 * 60_000; // 보고 자세(손 든 모양)를 유지하는 시간 — 사용자가 '확인 완료'를 누르면 바로 내린다
+const leadState = { since: 0, n: 0, reportN: 0, head: '', reportUntil: 0, tasks: [], who: [], work: new Map(), src: new Map() };
+let reportHandler = null;
+
+/** '확인 완료' — 손 든 자세를 내린다. 보고 중이었으면 true */
+export function ackReport(now = Date.now()) {
+  const was = now < leadState.reportUntil;
+  leadState.reportUntil = 0;
+  return was;
+}
+
+/** 팀장이 보고할 때마다 한 번 불린다(파일 저장·알림용). 테스트·데모에서는 꽂지 않는다 */
+export function setReportHandler(fn) {
+  reportHandler = typeof fn === 'function' ? fn : null;
+}
 const CLEANUP_EVERY_MS = 10 * 60 * 1000;
 const ASK_CHARS = 80;
 const PRIORITY = { decision: 0, working: 1, rest: 2 };
@@ -28,6 +46,7 @@ export function forget() {
   commitCache.clear();
   hookCache = { file: '', mtimeMs: -2, value: false };
   lastCleanup = 0;
+  Object.assign(leadState, { since: 0, n: 0, reportN: 0, head: '', reportUntil: 0, tasks: [], who: [], work: new Map(), src: new Map() });
 }
 
 function git(cwd, args) {
@@ -74,9 +93,15 @@ function hooksInstalled() {
 }
 
 /** 카드 상태 + 대화 기록 보정. 훅이 못 본 일(터미널에서 바로 승인·Esc·API 오류)을 대화로 알아본다 */
-export function cardStatus(card, last, now = Date.now()) {
+export function cardStatus(card, last, now = Date.now(), mtimeMs = 0) {
   let kind = PRIORITY[card.kind] !== undefined ? card.kind : 'rest';
   const wrote = Date.parse(String(card.updatedAt || '')) || 0;
+  // '일 끝' 도장(Stop)이 안 찍힌 채 오래 조용하면 쉬는 중으로 본다(승인 대기는 그대로 둔다)
+  if (kind === 'working') {
+    const lastAt = last && Number.isFinite(last.at) ? last.at : 0;
+    const quietSince = Math.max(wrote, lastAt, mtimeMs || 0);
+    if (quietSince > 0 && now - quietSince > IDLE_WORKING_MS) kind = 'rest';
+  }
   if (!last || !Number.isFinite(last.at)) return kind;
   if (kind === 'decision' && last.at > wrote + ANSWERED_MS) kind = 'working'; // 사용자가 답했다
   if (kind === 'working' && last.at > wrote) {
@@ -120,7 +145,7 @@ function collectSessions(cfg, now, starts) {
     const info = readTranscript(transcript);
     const cwd = (typeof card.cwd === 'string' && card.cwd) || info.cwd;
     if (!cwd) continue;
-    const status = cardStatus(card, info.last, now);
+    const status = cardStatus(card, info.last, now, tm);
     out.push({
       cwd,
       status,
@@ -140,6 +165,23 @@ function collectSessions(cfg, now, starts) {
     }
   }
   return { sessions: out, cardCount: cards.length };
+}
+
+/** 스킬을 방금 부른 기록(log 의 k:'skill') → 꼬마 직원. SKILL_MINI_MS 동안만 서 있다. 같은 스킬을 연달아 불러도 한 명 */
+const SKILL_MINI_MS = 120_000;
+function skillSubs(items, now) {
+  const seen = new Map();
+  for (const s of items) {
+    for (const e of s.info.log) {
+      if (e.k !== 'skill' || !e.a) continue;
+      const at = Date.parse(String(e.at || ''));
+      if (!Number.isFinite(at) || now - at > SKILL_MINI_MS || at - now > 60_000) continue;
+      if (!seen.has(e.a) || at > seen.get(e.a)) seen.set(e.a, at);
+    }
+  }
+  return [...seen].sort((a, b) => a[1] - b[1]).map(([name]) => ({
+    id: `skill-${name}`, type: 'Skill', desc: name, doing: null,
+  }));
 }
 
 /** 스냅샷 한 장. opts: now·cfg·starts(시험용 주입) */
@@ -164,6 +206,7 @@ export async function buildSnapshot(opts = {}) {
   }
 
   const people = [];
+  const srcByName = new Map(); // 프로젝트 이름 → 대화 파일들(보고서가 나중에 자세히 읽는다)
   for (const [key, { root, items }] of groups) {
     const base = path.basename(root) || root;
     if (matches(cfg.hide, base, key)) continue;
@@ -171,10 +214,12 @@ export async function buildSnapshot(opts = {}) {
     const asks = items.filter((s) => s.status === 'decision').sort((a, b) => b.at - a.at);
     const commits = await commitCount(root, now);
     const subs = items.flatMap((s) => runningSubagents(s.transcript, now));
+    if (cfg.skillMinis) subs.push(...skillSubs(items, now));
     // 한 프로젝트에 대화가 둘 이상이면(탭·/clear 직후) 가장 최근에 움직인 쪽이 '지금 하는 일'
     const lastAt = (s) => (s.info.log.length ? s.info.log[s.info.log.length - 1].at : '');
     const latest = items.reduce((a, b) => (lastAt(b) > lastAt(a) ? b : a));
     const log = items.flatMap((s) => s.info.log).sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0)).slice(-LOG_N);
+    srcByName.set(base, items.map((s) => s.transcript).filter(Boolean));
     people.push({
       id: root,
       name: base,
@@ -191,6 +236,86 @@ export async function buildSnapshot(opts = {}) {
       subCount: subs.length,
       doing: latest.info.doing,
       log,
+    });
+  }
+
+  // 가짜 직원(config.guests) — 항상 쉬는 장식. 진짜 프로젝트와 이름이 같으면 만들지 않는다
+  // guestsWork 가 켜져 있으면, 지금 진짜로 벌어지는 일(일하는 직원·서브에이전트·스킬)을 가짜 직원에게 차례로 하달한다
+  const tasks = cfg.guestsWork
+    ? people.flatMap((p) => [
+        ...(p.status === 'working' ? [p.doing || null] : []),
+        ...p.subs.map((x) => x.doing || { k: 'skill', a: x.desc }),
+      ])
+    : [];
+  // 팀장(config.lead): 일이 생기면 팀장이 먼저 일어나 필요한 만큼 소집·하달하고, 끝나면 보고(결재 대기 모양)한다
+  const lead = cfg.lead && (cfg.guests || []).some((g) => nameKey(g) === nameKey(cfg.lead)) ? cfg.lead : '';
+  const staff = (cfg.guests || []).filter((g) => !lead || nameKey(g) !== nameKey(lead));
+  const crew = Math.min(tasks.length, staff.length); // 소집 인원 = 일 수(자리 수까지)
+  const firstText = (t) => (t && typeof t === 'object' ? String(t.a || '') : '');
+  if (lead) {
+    if (tasks.length || leadState.since) {
+      const sinceIso = new Date((leadState.since || now) - 90_000).toISOString(); // 일 시작 직전 활동까지 담는다
+      for (const p of people) {
+        if (p.id.startsWith('/guest/')) continue;
+        absorb(leadState.work, p.name, p.log, sinceIso);
+        if (leadState.work.has(p.name)) {
+          const set = leadState.src.get(p.name) || new Set();
+          for (const f of srcByName.get(p.name) || []) set.add(f);
+          leadState.src.set(p.name, set);
+        }
+      }
+    }
+    if (tasks.length) {
+      if (!leadState.since) Object.assign(leadState, { since: now, tasks: [], who: [], work: new Map(), src: new Map() });
+      leadState.n = Math.max(leadState.n, tasks.length);
+      leadState.head = tasks.map(firstText).find(Boolean) || leadState.head;
+      leadState.reportUntil = 0;
+      for (const t of tasks) {
+        const x = oneLine(firstText(t), 120);
+        if (x && !leadState.tasks.includes(x) && leadState.tasks.length < 12) leadState.tasks.push(x);
+      }
+      for (const p of people) {
+        if (p.status === 'working' && !p.id.startsWith('/guest/') && !leadState.who.includes(p.name) && leadState.who.length < 12) leadState.who.push(p.name);
+      }
+    } else if (leadState.since) {
+      if (now - leadState.since >= LEAD_MIN_WORK_MS) {
+        leadState.reportUntil = now + LEAD_REPORT_MS;
+        leadState.reportN = leadState.n;
+        if (reportHandler) {
+          try {
+            reportHandler({ at: now, startedAt: leadState.since, n: leadState.n, tasks: [...leadState.tasks].reverse(), who: [...new Set([...leadState.who, ...leadState.work.keys()])], sections: sectionsOf(leadState.work), sources: Object.fromEntries([...leadState.src].map(([k, v]) => [k, [...v]])), sinceMs: leadState.since - 90_000 });
+          } catch (e) {
+            console.error(new Date().toISOString(), 'report handler failed:', e && e.message);
+          }
+        }
+      }
+      Object.assign(leadState, { since: 0, n: 0, work: new Map(), src: new Map() });
+    }
+  }
+  const reporting = lead && now < leadState.reportUntil;
+  let given = 0;
+  for (const g of cfg.guests || []) {
+    if (people.some((p) => nameKey(p.name) === nameKey(g))) continue;
+    const isLead = lead && nameKey(g) === nameKey(lead);
+    let status = 'rest';
+    let doing = '';
+    let ask = '';
+    if (isLead) {
+      if (tasks.length) {
+        status = 'working';
+        doing = { k: 'text', a: `업무 ${tasks.length}건 하달 · ${crew}명 소집` };
+      } else if (reporting) {
+        status = 'decision';
+        ask = `보고드립니다 — 업무 ${leadState.reportN}건 끝났습니다${leadState.head ? `: ${oneLine(leadState.head, 50)}` : ''}`;
+      }
+    } else if (given < crew) {
+      status = 'working';
+      doing = tasks[given++] || '';
+    }
+    people.push({
+      id: `/guest/${g}`, name: g, path: `/guest/${g}`, status, pending: status === 'decision' ? 1 : 0, ask, sessions: 1,
+      source: 'transcript', commits: null, kid: false, home: null, subs: [], subCount: 0, doing, log: [],
+      ...(isLead ? { lead: true } : {}),
     });
   }
 

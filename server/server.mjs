@@ -6,7 +6,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WEB_DIR, officeHome, pidFile, startingLock } from './paths.mjs';
 import { VERSION, demoPort, loadConfig, resolvePort } from './config.mjs';
-import { buildSnapshot } from './snapshot.mjs';
+import { ackReport, buildSnapshot, setReportHandler } from './snapshot.mjs';
+import { latestReport, makeHandler, markAcked } from './report.mjs';
 import { createDemo } from './demo.mjs';
 import { APP, health, openBrowser, removePidFile, urlOf } from './control.mjs';
 
@@ -94,6 +95,12 @@ export function createOfficeServer({ webDir = WEB_DIR, demo = false, snapshot } 
       const port = server.address() && server.address().port;
       const host = String(req.headers.host || '').toLowerCase();
       if (![`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`].includes(host)) return send(res, 403, 'forbidden');
+      // 유일한 쓰기 길: 팀장 보고 '확인 완료'. 다른 사이트가 몰래 누르지 못하게 사용자 지정 헤더(사전 확인 없이는 못 붙인다)를 요구한다
+      if (req.method === 'POST' && String(req.url || '').split('?')[0] === '/api/report/ack') {
+        if (demo || req.headers['x-office-ack'] !== '1') return send(res, 403, 'forbidden');
+        ackReport();
+        return sendJson(res, 200, { report: markAcked(loadConfig()) });
+      }
       if (req.method !== 'GET') return send(res, 405, 'method not allowed', undefined, { Allow: 'GET' });
       const raw = String(req.url || '/');
       const q = raw.indexOf('?');
@@ -113,6 +120,7 @@ export function createOfficeServer({ webDir = WEB_DIR, demo = false, snapshot } 
           return sendJson(res, 500, { error: 'snapshot failed' });
         }
       }
+      if (route === '/api/report') return sendJson(res, 200, { report: demo ? null : latestReport(loadConfig()) });
       if (route === '/api/config') return sendJson(res, 200, { lang: loadConfig().lang, version: VERSION });
       if (route === '/api/health') return sendJson(res, 200, { ok: true, app: APP, version: VERSION, demo, pid: process.pid });
       const abs = files.get(route === '/' ? '/index.html' : route);
@@ -147,6 +155,7 @@ async function main() {
   const port = opts.port || (opts.demo ? demoPort() : resolvePort());
   const url = urlOf(port);
   const server = createOfficeServer({ demo: opts.demo });
+  if (!opts.demo) setReportHandler(makeHandler(loadConfig)); // 팀장 보고 → 파일 저장·알림
   server.on('error', async (e) => {
     if (e.code !== 'EADDRINUSE') {
       console.error(`서버를 못 띄웠습니다 / cannot start server: ${e.message}`);

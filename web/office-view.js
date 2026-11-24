@@ -424,7 +424,7 @@
   const norm = d => ({ ...d, id: String(d.id ?? d.path ?? d.name), name: String(d.name ?? d.id ?? "?"),
                        subs: Array.isArray(d.subs) ? d.subs : [], log: Array.isArray(d.log) ? d.log : [] });
   const toLife = d => ({
-    id: d.id, name: d.name, status: d.status, ask: d.ask, kid: d.kid, home: d.home, commits: d.commits, path: d.path,
+    id: d.id, name: d.name, status: d.status, ask: d.ask, kid: d.kid, home: d.home, commits: d.commits, path: d.path, lead: !!d.lead,
     doing: I18N.act(d.doing), subCount: d.subCount || 0,
     subs: d.subs.map(s => ({ id: String(s.id), type: s.type || "", desc: s.desc || "", doing: I18N.act(s.doing) })),
   });

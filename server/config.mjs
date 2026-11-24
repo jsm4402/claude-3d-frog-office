@@ -9,6 +9,12 @@ export const DEFAULTS = Object.freeze({
   autoStart: true,
   homes: {},
   hide: [],
+  guests: [],
+  skillMinis: false,
+  guestsWork: false,
+  lead: '',
+  notify: false,
+  reportDir: '',
   fallbackMinutes: 20,
   staleHours: 6,
   kidCommits: 50,
@@ -38,6 +44,17 @@ export function normalizeConfig(raw) {
     autoStart: c.autoStart !== false,
     homes,
     hide: Array.isArray(c.hide) ? c.hide.filter((x) => typeof x === 'string' && x) : [],
+    // 항상 출근해 있는 '쉬는' 가짜 직원 이름들 — 진짜 세션과 무관한 장식(최대 12명)
+    // 스킬을 부르면 2분 동안 꼬마 직원으로 서 있게 한다(서브에이전트 꼬마와 같은 자리)
+    skillMinis: c.skillMinis === true,
+    // 켜면 진짜 일(일하는 직원·서브에이전트·스킬)이 생길 때 가짜 직원이 차례로 맡아 일하는 척한다
+    guestsWork: c.guestsWork === true,
+    lead: typeof c.lead === 'string' ? c.lead.trim().slice(0, 24) : '',
+    notify: c.notify === true,
+    reportDir: typeof c.reportDir === 'string' ? c.reportDir.trim().slice(0, 260) : '',
+    guests: Array.isArray(c.guests)
+      ? [...new Set(c.guests.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().slice(0, 24)))].slice(0, 12)
+      : [],
     fallbackMinutes: num(c.fallbackMinutes, 0, 24 * 60, DEFAULTS.fallbackMinutes),
     staleHours: num(c.staleHours, 0.05, 24 * 30, DEFAULTS.staleHours),
     kidCommits: num(c.kidCommits, 0, 1e9, DEFAULTS.kidCommits),
@@ -84,6 +101,6 @@ export function demoPort(cfg = loadConfig()) {
 
 /** setup 이 처음 만들어 두는 config.json 내용 */
 export function defaultConfigText() {
-  const { port, autoStart, homes, hide, fallbackMinutes, staleHours, kidCommits, lang } = DEFAULTS;
-  return JSON.stringify({ port, autoStart, homes, hide, fallbackMinutes, staleHours, kidCommits, lang }, null, 2) + '\n';
+  const { port, autoStart, homes, hide, guests, skillMinis, guestsWork, lead, notify, reportDir, fallbackMinutes, staleHours, kidCommits, lang } = DEFAULTS;
+  return JSON.stringify({ port, autoStart, homes, hide, guests, skillMinis, guestsWork, lead, notify, reportDir, fallbackMinutes, staleHours, kidCommits, lang }, null, 2) + '\n';
 }
